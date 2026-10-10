@@ -145,6 +145,16 @@ python examples/sampling_client.py HEAD~1 HEAD   # run inside the repo you want 
 callback is the part to copy into your own client: pass it as `sampling_callback=` to
 `ClientSession`, and the client starts advertising the capability.
 
+If `pip install -e .` fails while building `cryptography` (a Rust compile error such as
+`can't find crate for core`), pip found no prebuilt wheel and tried to compile from source. This
+happens with an Intel Python running on an Apple Silicon Mac. Upgrade pip and ask for a prebuilt
+`cryptography`, or switch to a native arm64 Python:
+
+```sh
+pip install -U pip
+pip install --only-binary=cryptography -e .
+```
+
 ### The fallbacks
 
 - **Anthropic API.** If sampling was unavailable or failed and `ANTHROPIC_API_KEY` is set, the server
