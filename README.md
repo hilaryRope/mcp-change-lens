@@ -70,6 +70,13 @@ compare against a remote branch.
 `structuredContent`) and a readable `summary`. Annotated read-only, idempotent, non-destructive,
 closed-world. Errors come back as `isError: true`. Progress notifications are sent while it runs.
 
+It covers everything in the diff, not only code: source files (runtime behaviour), documentation
+(what readers are now told), and config, dependency, build and CI files (how building, installing or
+running may change). Changed files are grouped as `code`, `test`, `docs`, `config`, `ci` or `other`.
+
+Only committed content is compared. If `base` and `head` are identical the tool says so
+(`has_changes: false`) instead of failing; use `base="HEAD~1"` to explain the latest commit.
+
 ## How the classification is produced
 
 1. **Client sampling**: if the MCP client supports `sampling`, the client's own model classifies the

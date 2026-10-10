@@ -27,6 +27,29 @@ def is_test_path(path: str) -> bool:
     return bool(TEST_PATH_RE.search(path))
 
 
+DOC_EXT = {".md", ".mdx", ".rst", ".txt", ".adoc", ".tex", ".org"}
+CONFIG_EXT = {".toml", ".yaml", ".yml", ".json", ".ini", ".cfg", ".conf", ".env", ".properties", ".xml", ".tf", ".lock"}
+CONFIG_NAMES = {"dockerfile", "makefile", "justfile", ".gitignore", ".gitattributes", ".dockerignore", "procfile"}
+CODE_EXT = {".py", ".rs", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".kt", ".rb", ".c", ".h", ".cc", ".cpp",
+            ".hpp", ".cs", ".swift", ".php", ".scala", ".sh", ".bash", ".zsh", ".sql", ".lua", ".dart", ".ex", ".exs"}
+DOC_NAMES = {"readme", "license", "licence", "changelog", "contributing", "notice", "authors", "code_of_conduct", "security"}
+
+
+def file_kind(path: str) -> str:
+    """Coarse category: test | code | docs | ci | config | other."""
+    p = PurePosixPath(path)
+    name, ext = p.name.lower(), p.suffix.lower()
+    if path.startswith((".github/workflows/", ".circleci/")) or name in (".gitlab-ci.yml", "jenkinsfile"):
+        return "ci"
+    if ext in CODE_EXT:
+        return "test" if is_test_path(path) else "code"
+    if ext in DOC_EXT or p.stem.lower() in DOC_NAMES or "docs" in [x.lower() for x in p.parts[:-1]]:
+        return "docs"
+    if ext in CONFIG_EXT or name in CONFIG_NAMES:
+        return "config"
+    return "test" if is_test_path(path) else "other"
+
+
 def func_name(line: str) -> str | None:
     for pat in DEF_PATTERNS:
         m = pat.match(line)
@@ -42,6 +65,9 @@ class FileChange:
     diff: str
     functions: list[str] = field(default_factory=list)
     is_test: bool = False
+    kind: str = "other"
+    added: int = 0
+    removed: int = 0
 
 
 @dataclass
@@ -114,7 +140,11 @@ def collect(repo, base_sha: str, head_sha: str):
             d = "(binary file)"
         old = gitops.read_blob(repo, base_sha, path) if status in "MD" else ""
         new = gitops.read_blob(repo, head_sha, path) if status in "MAR" else ""
-        fc = FileChange(path, status, "", changed_functions(d, old, new), is_test_path(path))
+        kind = file_kind(path)
+        fc = FileChange(path, status, "", changed_functions(d, old, new), kind == "test", kind)
+        body = [l for l in d.splitlines() if not l.startswith(("+++", "---"))]
+        fc.added = sum(l.startswith("+") for l in body)
+        fc.removed = sum(l.startswith("-") for l in body)
         if len(d) > MAX_PER_FILE:
             d = d[:MAX_PER_FILE] + "\n... [diff truncated]"
             truncated = True

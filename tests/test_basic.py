@@ -83,3 +83,28 @@ def test_calls_and_control_flow_are_not_definitions():
     for line in ["        match http_call(req) {", "    if check(x) {", "    return get(url)", "    http_call(req)"]:
         assert analysis.func_name(line) is None, line
     assert analysis.func_name("pub async fn send(req: &Request) -> Result<()> {") == "send"
+
+
+def test_identical_refs_is_not_an_error(repo):
+    res = call({"base": "main", "head": "HEAD", "repo_path": str(repo)})
+    assert not res.isError
+    assert res.structuredContent["has_changes"] is False
+    assert "same commit" in res.structuredContent["summary"]
+
+
+def test_docs_and_config_changes_are_reported(repo):
+    (repo / "README.md").write_text("# Svc\nRetries three times.\n")
+    (repo / "settings.toml").write_text("retries = 3\n")
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+    sh(repo, "git", "add", "."); sh(repo, "git", "commit", "-qm", "docs and config")
+    s = call({"base": "HEAD~1", "repo_path": str(repo)}).structuredContent
+    assert s["changed_files_by_kind"] == {"ci": [".github/workflows/ci.yml"], "docs": ["README.md"],
+                                          "config": ["settings.toml"]}
+    assert "README.md [docs, added, +2/-0]" in s["summary"]
+
+
+def test_file_kinds():
+    k = analysis.file_kind
+    assert [k("src/a.rs"), k("tests/a_test.rs"), k("LICENSE"), k("docs/guide/x.html"), k("pyproject.toml"),
+            k("img/logo.png")] == ["code", "test", "docs", "docs", "config", "other"]
