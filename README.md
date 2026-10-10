@@ -63,12 +63,16 @@ runs the analysis once with your session's own model.
    ```
 
    Already registered? Reconnect it with `/mcp` so it picks up the new version.
-3. **Start Claude Code with the mod**, from inside the repository you want to review. Use the full
-   path to this repo's `claude-mod` folder. It loads for that session only:
+3. **Start a new Claude Code session with the mod**, from inside the repository you want to review.
+   Use the full path to this repo's `claude-mod` folder:
 
    ```sh
    claude --plugin-dir /path/to/mcp-change-lens/claude-mod
    ```
+
+   The mod loads only into a session started with this flag, for that session only. It does not
+   appear in a session that is already running, and `/mcp` does not load it. Without the flag,
+   typing `/change-lens` gives "Unknown command".
 
 4. **Allow the tool once.** Without this Claude Code refuses the mod's call. Run `/permissions` and
    add the allow rule `mcp__change-lens__explain_change`, or start with
@@ -81,9 +85,19 @@ runs the analysis once with your session's own model.
 
    With no arguments it reviews the latest commit. `/change-lens main feature/x` reviews a range.
 
-It worked if the report ends with `(analysis by this session's model, <model>)`. If it shows the
-facts-only report instead, the message under it says why. The most common causes are an old server
-(step 1), a missing permission (step 4) and a repository outside the allowed roots (step 2).
+A large diff can take a minute or two. The status line shows "change-lens: analysing with this
+session's model..." while the model works, and nothing else appears until it finishes.
+
+It worked if the report ends with `(analysis by this session's model, <model>)`. If not, find what
+you see here:
+
+| What you see | Cause and fix |
+|---|---|
+| "Unknown command" or "No commands match" | The session was not started with `--plugin-dir`. Start a new one (step 3). |
+| "Claude Code has not been allowed to call ..." | The permission is missing. Do step 4 again in that session. |
+| The facts-only report with a hint to update the server | The server is old. Reinstall it (step 1), then restart the session. |
+| The facts-only report saying the model gave no analysis | The model call failed. The reason is in the message, so run `/change-lens` again. |
+| An error saying the repository is outside the allowed roots | Add its parent directory to `CHANGE_LENS_ALLOWED_ROOTS` (step 2) and reconnect. |
 
 ## Configuration
 
