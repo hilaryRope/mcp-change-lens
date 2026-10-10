@@ -44,7 +44,24 @@ re-add the server and reconnect (`/mcp` in Claude Code, or restart the client); 
 keeps the environment it was started with.
 
 To get the LLM classification (see below) add `-e ANTHROPIC_API_KEY=...` to the `claude mcp add`
-command, or an `ANTHROPIC_API_KEY` entry under `env`.
+command, or an `ANTHROPIC_API_KEY` entry under `env`. Without a key you get the facts-only report,
+unless your client supports sampling, in which case the client's own model is used and no key is
+needed. See [Configuration](#configuration) for all settings.
+
+## Configuration
+
+All settings are environment variables of the server process. A running server keeps the
+environment it was started with, so reconnect the client after changing them.
+
+| Variable | Read by | Default | Purpose |
+|----------|---------|---------|---------|
+| `CHANGE_LENS_ALLOWED_ROOTS` | server | the server's working directory | Directories that repositories must be inside, separated by `:` (`;` on Windows) |
+| `ANTHROPIC_API_KEY` | server | unset | Enables the direct Anthropic API fallback when client sampling is unavailable or fails |
+| `CHANGE_LENS_MODEL` | server | `claude-sonnet-5-5` | Model for that API fallback |
+| `CHANGE_LENS_SAMPLING_MODEL` | example client only | `claude-sonnet-5-5` | Model the example client uses to answer sampling requests |
+
+The key and model settings for the example client are read by the client process, not by the server.
+The server is deliberately started by the example client without a key.
 
 ## Usage
 
@@ -236,11 +253,10 @@ Changed functions
 7. src/change_lens/server.py:render
 8. src/change_lens/server.py:_files
 9. src/change_lens/server.py:explain_change
-10. src/change_lens/server.py:ToolError
-11. tests/test_basic.py:test_calls_and_control_flow_are_not_definitions
-12. tests/test_basic.py:test_identical_refs_is_not_an_error
-13. tests/test_basic.py:test_docs_and_config_changes_are_reported
-14. tests/test_basic.py:test_file_kinds
+10. tests/test_basic.py:test_calls_and_control_flow_are_not_definitions
+11. tests/test_basic.py:test_identical_refs_is_not_an_error
+12. tests/test_basic.py:test_docs_and_config_changes_are_reported
+13. tests/test_basic.py:test_file_kinds
 
 Candidate existing tests
 1. tests/test_basic.py (modified in this change)
@@ -281,13 +297,34 @@ Repository content is untrusted.
 Function detection is regex/indentation based (Rust, Python, JS/TS, Go, Java/Kotlin-like, Ruby), not a
 parser. Test matching is by name reference. Both are heuristics that feed the LLM, which is told to hedge.
 
+The C-style pattern reads any `type name(` line as a definition, after excluding statement keywords
+such as `return`, `raise`, `assert`, `elif`, `with`, `and` and `or`. Unusual syntax can still produce
+a wrong entry in "Changed functions", or miss a real one. Treat that list as a hint, not an index.
+
+A sampling failure on the client is reported to the server only as a generic error, so the note
+cannot always name the real cause (see [Telling "unsupported" from "failed"](#telling-unsupported-from-failed)).
+
 ## Development
 
-Requires Python 3.10 or newer.
+Requires Python 3.10 or newer. Use a virtual environment, so the package, `pytest` and the example
+client all resolve against the same interpreter:
 
 ```sh
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e . pytest && pytest
 ```
+
+Layout:
+
+- `src/change_lens/server.py`: the tool, the sampling call and the fallback chain.
+- `src/change_lens/analysis.py`: changed files, function detection and test matching.
+- `src/change_lens/gitops.py`: safe, read-only Git access.
+- `src/change_lens/llm.py`: prompts, schema and the direct API call.
+- `tests/`: unit tests, plus end-to-end tests that connect a client to the server in memory, including
+  fake sampling callbacks for the success, unsupported, error and unparseable-reply cases.
+- `examples/sampling_client.py`: a client with a real sampling callback.
+
+CI runs the tests on Python 3.10 and 3.13 for every push to `main` and every pull request.
 
 ## License
 

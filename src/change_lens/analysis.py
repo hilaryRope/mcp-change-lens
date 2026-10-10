@@ -13,7 +13,7 @@ DEF_PATTERNS = [
     re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(\w+)"),                 # js/ts
     re.compile(r"^\s*(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>"),   # arrow
     re.compile(r"^\s*func\s+(?:\([^)]*\)\s*)?(\w+)"),                                                    # go
-    re.compile(r"^(?!\s*(?:return|else|new|throw|await|yield|case|import|match|if|for|while|switch|let|use|loop|in|do)\b)\s*(?:public|private|protected|static|final|override|suspend|\s)*(?:fun|void|[\w<>\[\],]+)\s+(\w+)\s*\([^;]*$"),  # java/kotlin/c-ish
+    re.compile(r"^(?!\s*(?:return|else|new|throw|await|yield|case|import|match|if|for|while|switch|let|use|loop|in|do|raise|assert|elif|with|except|try|finally|pass|del|not|and|or|is|lambda|print|global|nonlocal|delete|goto|typeof|sizeof|from)\b)\s*(?:public|private|protected|static|final|override|suspend|\s)*(?:fun|void|[\w<>\[\],]+)\s+(\w+)\s*\([^;]*$"),  # java/kotlin/c-ish
     re.compile(r"^\s*def\s+(?:self\.)?(\w+[?!]?)"),                                                      # ruby
 ]
 KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "new", "else", "match", "fn", "def"}

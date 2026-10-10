@@ -127,6 +127,27 @@ def test_unparseable_sampling_reply_falls_back(repo):
     assert "client sampling failed (ValueError: no JSON object in reply)" in res.structuredContent["summary"]
 
 
+@pytest.mark.parametrize("line", [
+    "        raise ValueError(f'x')", "    assert any(m for m in logs)", "    elif check(x):",
+    "    with open(path) as f:", "    except ValueError(", "        or check(x)", "        and check(x)",
+    "    not check(x)", "    print foo(x)", "    try something(", "    pass helper(", "    del cache.pop(k)",
+    "    global foo(", "    goto next(x)", "    typeof foo(",
+])
+def test_statement_keywords_are_not_return_types(line):
+    assert analysis.func_name(line) is None, line
+
+
+@pytest.mark.parametrize("line,name", [
+    ("    public static void main(String[] a) {", "main"),
+    ("    private int count(List<X> l) {", "count"),
+    ("    public void fromJson(String s) {", "fromJson"),   # starts with a keyword, is still a name
+    ("    int isValid(int x) {", "isValid"),
+    ("  static async load(url) {", "load"),
+])
+def test_real_definitions_still_detected(line, name):
+    assert analysis.func_name(line) == name
+
+
 def test_calls_and_control_flow_are_not_definitions():
     for line in ["        match http_call(req) {", "    if check(x) {", "    return get(url)", "    http_call(req)"]:
         assert analysis.func_name(line) is None, line
