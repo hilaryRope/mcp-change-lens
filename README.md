@@ -19,8 +19,10 @@ the diff and tests, not guaranteed discoveries.
 ## Install
 
 ```sh
-uv tool install git+<this-repo-url>      # or: pip install .
+uv tool install git+ssh://git@github.com/hilaryRope/mcp-change-lens.git
 ```
+
+The repository is private, so this needs GitHub access to it. From a local clone, `pip install .` works too.
 
 Register with Claude Code:
 
@@ -50,6 +52,9 @@ closed-world. Errors come back as `isError: true`. Progress notifications are se
 3. Else the tool still returns the extracted facts (changed functions, candidate tests) with
    `analysis_source: "none"` and Low confidence.
 
+Many clients do not support sampling yet. With such a client and no `ANTHROPIC_API_KEY`, you get the
+facts-only report. The key is optional and is only ever read from the server's environment.
+
 ## Security model
 
 Repository content is untrusted.
@@ -72,3 +77,7 @@ parser. Test matching is by name reference. Both are heuristics that feed the LL
 ```sh
 pip install -e . pytest && pytest
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
