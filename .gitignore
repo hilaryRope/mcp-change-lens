@@ -1,0 +1,12 @@
+__pycache__
+.idea
+bin
+lib
+pyvenv.cfg
+CACHEDIR.TAG
+.venv
+*.egg-info
+.lock
+.mcp.json
+.claude/settings.local.json
+.pytest_cache
