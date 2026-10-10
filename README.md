@@ -93,6 +93,50 @@ branch against `main`, or two releases. Every changed file is included and group
 Each finding names the file it comes from, and the model is told to hedge and to say when the
 evidence is thin. Large diffs are size-capped, and the report says when it was truncated.
 
+## How the pieces fit together
+
+There are two separate things in this repository. Only the first is the product.
+
+1. **The server** (`src/change_lens`). This is what you install and register. It does all the
+   analysis. You never run it by hand. Your AI assistant starts it and calls its one tool.
+2. **The example client** (`examples/sampling_client.py`). Optional. A small stand-in for an AI
+   assistant, used only to get a full report without an API key. It does no analysis.
+
+```
+ You, through an AI assistant (the "client": Claude Code, Claude Desktop, ...)
+   |
+   |  calls explain_change(base, head)
+   v
+ change-lens server                          <- src/change_lens, what you install
+   1. reads the Git diff, read-only          (gitops.py)
+   2. finds changed files, functions, tests  (analysis.py)
+   3. needs a model to write the findings:   (server.py, llm.py)
+        a. sampling: ask the CLIENT's model  needs a client that supports sampling
+        b. else call the Anthropic API       needs ANTHROPIC_API_KEY on the server
+        c. else return the facts only        needs nothing
+   4. builds the report and sends it back    (server.py)
+```
+
+Steps 1, 2 and 4 are the same every time. Only step 3 changes, depending on what is available.
+
+| | Server (`src/`) | Example client (`examples/`) |
+|---|---|---|
+| Installed and registered by you | yes | no |
+| Reads Git, finds functions and tests | yes | no |
+| Builds the prompt and parses the reply | yes | no |
+| Decides sampling, API key or facts only | yes | no |
+| Writes the findings | no, it asks a model | no, it passes the request to a model |
+| Needed in normal use | yes | no |
+
+**Normal use.** You register the server with your assistant (see Install). The assistant is the
+client. The example client is not involved at all.
+
+**Why the example client exists.** Claude Code cannot answer sampling requests yet, so there the
+server falls back to an API key or to facts only. The example client can answer them, using your
+API key or your logged-in `claude` command. It starts the server, passes the model call through,
+and prints the report. Everything in the report still comes from the server. If Claude Code gains
+sampling support, you will not need the example client.
+
 ## Getting a full report
 
 The server collects the facts itself. A language model then turns them into findings. The server
@@ -109,12 +153,15 @@ If a step is unavailable or fails, the server moves to the next one. It never fa
 **Claude Code does not support sampling today.** There, a full report needs `ANTHROPIC_API_KEY` on
 the server (`claude mcp add ... -e ANTHROPIC_API_KEY=...`). Without it you get facts only.
 
-To get a full report with no server key, use a client that supports sampling. The repo includes one:
+To get a full report with no server key, use a client that supports sampling. The repo includes a
+simple one for this purpose:
 
 ### Example sampling client
 
-`examples/sampling_client.py` starts the server with no key and answers its sampling requests
-itself. It has two backends:
+**Optional, and not the product.** `examples/sampling_client.py` is a stand-in client. It starts the
+server with no key and answers its sampling requests by passing them to a model. The server still
+does all the analysis (see [How the pieces fit together](#how-the-pieces-fit-together)). It has two
+backends:
 
 | Backend | Command | Needs |
 |---------|---------|-------|
