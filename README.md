@@ -95,12 +95,14 @@ evidence is thin. Large diffs are size-capped, and the report says when it was t
 
 ## How the pieces fit together
 
-There are two separate things in this repository. Only the first is the product.
+There are three separate things in this repository. Only the first is the product.
 
 1. **The server** (`src/change_lens`). This is what you install and register. It does all the
    analysis. You never run it by hand. Your AI assistant starts it and calls its one tool.
 2. **The example client** (`examples/sampling_client.py`). Optional. A small stand-in for an AI
    assistant, used only to get a full report without an API key. It does no analysis.
+3. **The Claude Code mod** (`claude-mod/`). Optional. Adds a `/change-lens` command and a
+   post-commit hint to Claude Code. It calls the server and does no analysis either.
 
 ```
  You, through an AI assistant (the "client": Claude Code, Claude Desktop, ...)
@@ -136,6 +138,37 @@ server falls back to an API key or to facts only. The example client can answer 
 API key or your logged-in `claude` command. It starts the server, passes the model call through,
 and prints the report. Everything in the report still comes from the server. If Claude Code gains
 sampling support, you will not need the example client.
+
+## Claude Code mod (optional)
+
+`claude-mod/` is a small Claude Code mod that makes the server easier to reach from inside Claude
+Code. It needs the server registered under the name `change-lens` (see Install). It does exactly two
+things, and nothing else:
+
+| What | When | Effect |
+|------|------|--------|
+| `/change-lens [base [head]]` | You type it. Defaults to `HEAD~1 HEAD`, the latest commit. | Calls the server's `explain_change` tool directly and prints the report. The status line then shows the confidence level. |
+| A reminder toast | After a successful `git commit` run through Claude Code's Bash tool. | Shows "Committed. Run /change-lens to review this commit." Nothing is run for you. |
+
+What it does **not** do:
+- It does not analyse anything. The server does, and the mod only shows what the server returns.
+- It does not run a review automatically, so no repository content is sent to a model unless you
+  type `/change-lens`.
+- It does not send the report to Claude's model. The report is shown to you only.
+- It does not change settings, register the server or touch your global configuration.
+
+Because Claude Code does not support sampling, `/change-lens` still gives a full report only when
+the server has `ANTHROPIC_API_KEY`. Otherwise it shows the facts-only report with the reason.
+
+Load it for a session from a clone:
+
+```sh
+claude --plugin-dir ./claude-mod
+```
+
+Then run `/change-lens`, `/change-lens main`, or `/change-lens main feature/x`. Refs are checked
+before the call, and the server validates them again. To run the mod's tests, use
+`claude plugin test claude-mod`.
 
 ## Getting a full report
 
@@ -326,6 +359,7 @@ pip install -e . pytest && pytest
 - `src/change_lens/gitops.py`: read-only Git access.
 - `src/change_lens/llm.py`: prompts, schema and the API call.
 - `examples/sampling_client.py`: the example client.
+- `claude-mod/`: the Claude Code mod. `hooks/register.ts` holds the hooks, `hooks/lib.ts` the pure helpers.
 
 CI runs the tests on Python 3.10 and 3.13 for pushes to `main` and for pull requests.
 

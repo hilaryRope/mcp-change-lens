@@ -1,0 +1,8 @@
+{
+  "name": "change-lens-companion",
+  "version": "0.1.0",
+  "description": "Adds a /change-lens command and a post-commit hint to Claude Code, backed by the change-lens MCP server",
+  "author": {
+    "name": "Ilaria Corda"
+  }
+}
