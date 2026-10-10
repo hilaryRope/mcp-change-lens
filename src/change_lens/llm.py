@@ -1,4 +1,4 @@
-"""LLM classification of behavioural impact.
+"""LLM review of a change's impact: behaviour, affected components, tests and gaps, docs, config and CI.
 
 The model gets NO tools except a forced structured-output tool, so nothing in the
 repository content can trigger execution. Repo text is wrapped as untrusted data.

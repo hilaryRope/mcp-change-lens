@@ -1,7 +1,7 @@
 [project]
 name = "mcp-change-lens"
 version = "0.1.0"
-description = "MCP server that explains what changed between two Git commits in terms of behaviour"
+description = "MCP server that reviews a change between two Git refs: behavioural impact, affected components, test coverage and gaps, docs, config and CI"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

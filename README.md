@@ -1,7 +1,9 @@
 # mcp-change-lens
 
-An MCP server with one tool, `explain_change(base, head)`, that explains what changed between two
-Git commits **in terms of behaviour**, not files and lines.
+An MCP server with one tool, `explain_change(base, head)`, that reviews a change between two Git
+refs (commits, branches or tags). It goes beyond listing what differs. It assesses what the change
+may mean in practice: what behaviour may shift, what it may affect, which tests cover it and which
+are missing, whether the docs still match, and how confident that assessment is.
 
 ```
 Behavioural impact
@@ -12,17 +14,17 @@ Behavioural impact
 Confidence: Medium
 ```
 
-It returns the behaviour that may have changed, existing tests that cover it, potentially affected
-components, missing test scenarios and a confidence level. Findings are **hypotheses** grounded in
-the diff and tests, not guaranteed discoveries.
+Each report contains behavioural impact, existing tests, potentially affected components, missing
+test scenarios and a confidence level. Findings are **hypotheses** grounded in the diff and tests,
+not guaranteed discoveries.
 
 ## Install
 
 ```sh
-uv tool install git+ssh://git@github.com/hilaryRope/mcp-change-lens.git
+uv tool install git+https://github.com/hilaryRope/mcp-change-lens.git
 ```
 
-The repository is private, so you need GitHub access. From a clone, `pip install .` also works.
+From a clone, `pip install .` also works.
 
 Register with Claude Code:
 
@@ -66,9 +68,30 @@ Arguments: `base`, optionally `head` (default `HEAD`) and `repo_path` (default `
 exist locally, so fetch first to compare against a remote branch. To explain the latest commit, use
 `base` = `HEAD~1` and `head` = `HEAD`.
 
-The tool covers the whole diff: code, docs, config, dependencies, build and CI. It compares
-committed content only. Identical refs are a normal result (`has_changes: false`), not an error.
-The output is structured (`structuredContent`) plus a readable `summary`, and the tool is read-only.
+It compares committed content only. Identical refs are a normal result (`has_changes: false`), not
+an error. The output is structured (`structuredContent`) plus a readable `summary`, and the tool is
+read-only.
+
+## What it covers
+
+`base` and `head` can be any two refs, so you can review one commit (`HEAD~1` to `HEAD`), a whole
+branch against `main`, or two releases. Every changed file is included and grouped as `code`, `test`,
+`docs`, `config`, `ci` or `other`. The review covers:
+
+- **Code:** how runtime behaviour may change.
+- **Docs** (README, guides, changelog, licence): what readers are now told or asked to do, and
+  whether the docs still match the code in the diff.
+- **Config, dependencies, build and CI:** how building, installing, deploying or running may change.
+- **Anything else** (data, assets, schemas): what consumers of the file may see differently.
+- **Tests:** existing tests that plausibly cover the change and what they miss, plus concrete test
+  scenarios that are missing. For prose changes it suggests a check a human could do instead.
+- **User-facing effects:** because the model reads the whole diff, findings can also point out
+  changed messages, flags or log lines, instructions that may now be stale, and where repository
+  content is sent. For example, a review of this repository's own commits flagged that a log line
+  changed and that earlier README troubleshooting advice referred to the old text.
+
+Each finding names the file it comes from, and the model is told to hedge and to say when the
+evidence is thin. Large diffs are size-capped, and the report says when it was truncated.
 
 ## Getting a full report
 
