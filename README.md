@@ -64,6 +64,14 @@ takes `base`, optionally `head` (default `HEAD`) and `repo_path` (default `.`, i
 the client started the server from). Both refs must exist locally; fetch first if you want to
 compare against a remote branch.
 
+To explain just the latest commit, compare `HEAD~1` with `HEAD`. The example report below was
+produced by running this on this repository:
+
+```sh
+claude -p "Use the change-lens explain_change tool with base HEAD~1 and head HEAD in this repo and print its summary verbatim." \
+  --allowedTools "mcp__change-lens__explain_change"
+```
+
 ## Tool
 
 `explain_change(base, head="HEAD", repo_path=".")` returns structured output (`outputSchema` +
@@ -89,27 +97,58 @@ Many clients, including Claude Code at the time of writing, do not support sampl
 client and no `ANTHROPIC_API_KEY`, you get the facts-only report. The key is optional and is only
 ever read from the server's environment.
 
-A facts-only report looks like this:
+A facts-only report looks like this. This is the real output for commit `58fe62e` of this
+repository, compared against its parent with the `HEAD~1` command shown under [Usage](#usage):
 
 ```
 Behavioural impact
 ------------------
-(behavioural classification unavailable; showing extracted facts only)
+(impact classification unavailable; showing extracted facts only)
+
+Changed files
+1. README.md [docs, modified, +7/-0]
+2. src/change_lens/analysis.py [code, modified, +31/-1]
+3. src/change_lens/llm.py [code, modified, +10/-2]
+4. src/change_lens/server.py [code, modified, +44/-14]
+5. tests/test_basic.py [test, modified, +25/-0]
 
 Changed functions
 1. src/change_lens/analysis.py:is_test_path
-2. src/change_lens/gitops.py:log_subjects
+2. src/change_lens/analysis.py:file_kind
+3. src/change_lens/analysis.py:collect
+4. src/change_lens/server.py:ImpactReport
+5. src/change_lens/server.py:_bullets
+6. src/change_lens/server.py:build_context
+7. src/change_lens/server.py:render
+8. src/change_lens/server.py:_files
+9. src/change_lens/server.py:explain_change
+10. src/change_lens/server.py:ToolError
+11. tests/test_basic.py:test_calls_and_control_flow_are_not_definitions
+12. tests/test_basic.py:test_identical_refs_is_not_an_error
+13. tests/test_basic.py:test_docs_and_config_changes_are_reported
+14. tests/test_basic.py:test_file_kinds
 
 Candidate existing tests
-(none identified)
+1. tests/test_basic.py (modified in this change)
 
 Confidence: Low (no behavioural analysis performed)
 
 Note: the client does not support sampling and ANTHROPIC_API_KEY is not set (or the call failed).
+
+These findings are hypotheses grounded in the diff and tests, not guaranteed discoveries.
 ```
 
 The structured content then has empty `behaviour_changes`, `existing_tests`, `affected_components`
-and `missing_tests` lists, with `analysis_source: "none"`.
+and `missing_tests` lists, with `analysis_source: "none"`, plus `changed_files`,
+`changed_files_by_kind` and `changed_functions` populated as above.
+
+Comparing a ref with itself is not an error:
+
+```
+No differences: HEAD and HEAD point to the same commit (58fe62e). Nothing can behave differently.
+To get a report, compare refs that differ, e.g. base='HEAD~1' for the last commit, or an older
+commit, tag or branch. Only committed changes are compared; uncommitted edits are not included.
+```
 
 ## Security model
 
