@@ -38,6 +38,32 @@ or in `.mcp.json` / Claude Desktop config:
     "env": { "CHANGE_LENS_ALLOWED_ROOTS": "/Users/me/code" } } } }
 ```
 
+`CHANGE_LENS_ALLOWED_ROOTS` must contain every repository you want to analyse (colon-separated
+for several). A repo outside it is rejected with `... is outside the allowed roots`. To change it,
+re-add the server and reconnect (`/mcp` in Claude Code, or restart the client); a running server
+keeps the environment it was started with.
+
+To get the LLM classification (see below) add `-e ANTHROPIC_API_KEY=...` to the `claude mcp add`
+command, or an `ANTHROPIC_API_KEY` entry under `env`.
+
+## Usage
+
+In an interactive Claude Code session, ask it to compare two refs:
+
+> Use explain_change to compare `main` with `HEAD` in this repo.
+
+From the shell, run it non-interactively from inside the repository:
+
+```sh
+claude -p "Use the change-lens explain_change tool to compare main with HEAD in this repo and print its summary verbatim." \
+  --allowedTools "mcp__change-lens__explain_change"
+```
+
+`--allowedTools` pre-approves the tool so the run does not stop for a permission prompt. The tool
+takes `base`, optionally `head` (default `HEAD`) and `repo_path` (default `.`, i.e. the directory
+the client started the server from). Both refs must exist locally; fetch first if you want to
+compare against a remote branch.
+
 ## Tool
 
 `explain_change(base, head="HEAD", repo_path=".")` returns structured output (`outputSchema` +
@@ -52,8 +78,9 @@ closed-world. Errors come back as `isError: true`. Progress notifications are se
 3. Else the tool still returns the extracted facts (changed functions, candidate tests) with
    `analysis_source: "none"` and Low confidence.
 
-Many clients do not support sampling yet. With such a client and no `ANTHROPIC_API_KEY`, you get the
-facts-only report. The key is optional and is only ever read from the server's environment.
+Many clients, including Claude Code at the time of writing, do not support sampling. With such a
+client and no `ANTHROPIC_API_KEY`, you get the facts-only report. The key is optional and is only
+ever read from the server's environment.
 
 ## Security model
 
