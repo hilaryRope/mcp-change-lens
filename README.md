@@ -82,6 +82,28 @@ Many clients, including Claude Code at the time of writing, do not support sampl
 client and no `ANTHROPIC_API_KEY`, you get the facts-only report. The key is optional and is only
 ever read from the server's environment.
 
+A facts-only report looks like this:
+
+```
+Behavioural impact
+------------------
+(behavioural classification unavailable; showing extracted facts only)
+
+Changed functions
+1. src/change_lens/analysis.py:is_test_path
+2. src/change_lens/gitops.py:log_subjects
+
+Candidate existing tests
+(none identified)
+
+Confidence: Low (no behavioural analysis performed)
+
+Note: the client does not support sampling and ANTHROPIC_API_KEY is not set (or the call failed).
+```
+
+The structured content then has empty `behaviour_changes`, `existing_tests`, `affected_components`
+and `missing_tests` lists, with `analysis_source: "none"`.
+
 ## Security model
 
 Repository content is untrusted.
