@@ -43,6 +43,48 @@ Or add it to `.mcp.json` / the Claude Desktop config:
 A server keeps the environment it was started with. After changing it, reconnect (`/mcp` in Claude
 Code) or restart the client.
 
+## Quick start in Claude Code, with no API key
+
+This gets you a full report in Claude Code without giving the server a key. The Claude Code mod
+runs the analysis once with your session's own model.
+
+1. **Install the current server.** The mod needs a server that supports `defer_analysis` and
+   `report`. An older installed copy only gives the facts-only report. From a clone of this repo:
+
+   ```sh
+   uv tool install --force .
+   ```
+
+   Or straight from GitHub: `uv tool install --force git+https://github.com/hilaryRope/mcp-change-lens.git`.
+2. **Register the server once**, naming every directory that holds repositories you will review:
+
+   ```sh
+   claude mcp add change-lens -e CHANGE_LENS_ALLOWED_ROOTS=$HOME/code -- mcp-change-lens
+   ```
+
+   Already registered? Reconnect it with `/mcp` so it picks up the new version.
+3. **Start Claude Code with the mod**, from inside the repository you want to review. Use the full
+   path to this repo's `claude-mod` folder. It loads for that session only:
+
+   ```sh
+   claude --plugin-dir /path/to/mcp-change-lens/claude-mod
+   ```
+
+4. **Allow the tool once.** Without this Claude Code refuses the mod's call. Run `/permissions` and
+   add the allow rule `mcp__change-lens__explain_change`, or start with
+   `--allowedTools "mcp__change-lens__explain_change"`.
+5. **Run it.**
+
+   ```
+   /change-lens
+   ```
+
+   With no arguments it reviews the latest commit. `/change-lens main feature/x` reviews a range.
+
+It worked if the report ends with `(analysis by this session's model, <model>)`. If it shows the
+facts-only report instead, the message under it says why. The most common causes are an old server
+(step 1), a missing permission (step 4) and a repository outside the allowed roots (step 2).
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -67,6 +109,13 @@ claude -p "Use the change-lens explain_change tool to compare main with HEAD in 
 Arguments: `base`, optionally `head` (default `HEAD`) and `repo_path` (default `.`). Both refs must
 exist locally, so fetch first to compare against a remote branch. To explain the latest commit, use
 `base` = `HEAD~1` and `head` = `HEAD`.
+
+Two optional arguments let a caller that has its own model run the analysis itself. Call with
+`defer_analysis=true` to get the facts and an `analysis_request` (system prompt, prompt and a
+suggested token cap) with no model run on the server. Run it with your model, then call again with
+the same refs and the model's JSON reply as `report`. The server validates the reply and renders
+the report, with `analysis_source: "host-model"`. The reply can be the JSON object or text that
+contains it. Do not pass both arguments in one call.
 
 It compares committed content only. Identical refs are a normal result (`has_changes: false`), not
 an error. The output is structured (`structuredContent`) plus a readable `summary`, and the tool is
@@ -120,6 +169,9 @@ There are three separate things in this repository. Only the first is the produc
 ```
 
 Steps 1, 2 and 4 are the same every time. Only step 3 changes, depending on what is available.
+There is also a two-step variant for callers that have their own model but cannot offer sampling:
+the caller asks for the prompt (`defer_analysis`), runs it with its own model, and sends the reply
+back (`report`). The server checks and renders it. The Claude Code mod works this way.
 
 | | Server (`src/`) | Example client (`examples/`) |
 |---|---|---|
@@ -158,31 +210,51 @@ tool, `explain_change`. The mod only adds Claude Code features on top of it.
 There are three ways to reach the same tool:
 
 - **Ask Claude.** The model decides to call `explain_change`.
-- **Run `/change-lens`.** The mod calls the tool directly, with no model involved.
+- **Run `/change-lens`.** The mod gets the facts and the prompt from the tool, runs the analysis
+  once with your Claude Code session's own model, and sends the reply back to the tool to be
+  checked and rendered. No API key is needed.
 - **Run the example client.** It calls the tool directly and also answers the server's model requests.
 
 Without the server the mod does nothing useful. Without the mod the server works fully.
 
 ## Claude Code mod (optional)
 
-`claude-mod/` is a small Claude Code mod that makes the server easier to reach from inside Claude
-Code. It needs the server registered under the name `change-lens` (see Install). It does exactly two
-things, and nothing else:
+`claude-mod/` is a small Claude Code mod that gets you a full report inside Claude Code with no API
+key. It needs the server registered under the name `change-lens` (see the quick start). It does
+exactly two things, and nothing else:
 
 | What | When | Effect |
 |------|------|--------|
-| `/change-lens [base [head]]` | You type it. Defaults to `HEAD~1 HEAD`, the latest commit. | Calls the server's `explain_change` tool directly and prints the report. The status line then shows the confidence level. |
+| `/change-lens [base [head]]` | You type it. Defaults to `HEAD~1 HEAD`, the latest commit. | Reviews the change and prints the report. See the three steps below. The status line then shows the confidence level. |
 | A reminder toast | After a successful `git commit` run through Claude Code's Bash tool. | Shows "Committed. Run /change-lens to review this commit." Nothing is run for you. |
 
+What `/change-lens` does, in order:
+
+1. Calls the server's `explain_change` with `defer_analysis`. The server reads Git and returns the
+   facts plus the prompt. It runs no model.
+2. Runs that prompt once with your Claude Code session's own model (the one `/model` shows), using
+   the mod's model call: no tools, no history, no API key. The diff goes to that model.
+3. Calls `explain_change` again with the model's reply as `report`. The server checks the reply and
+   renders the report, which is printed to you.
+
+If step 2 or 3 fails, you get the facts-only report from step 1 and the reason. If the server is too
+old to defer the analysis, you get its facts-only report and a hint to update it.
+
 What it does **not** do:
-- It does not analyse anything. The server does, and the mod only shows what the server returns.
-- It does not run a review automatically, so no repository content is sent to a model unless you
-  type `/change-lens`.
-- It does not send the report to Claude's model. The report is shown to you only.
+- It does not read Git or analyse code itself. The server does that, and the mod only runs the
+  prompt through your model and shows the result.
+- It does not run a review automatically. No repository content is sent to a model unless you type
+  `/change-lens`.
+- It does not hide the report from your session. The printed report is part of the conversation
+  like any command output, so Claude can read it on later turns. Tested: asked afterwards, the
+  session's model quoted the report's first finding. The model call that wrote the report is a
+  separate request with no history. It is not part of the conversation.
 - It does not change settings, register the server or touch your global configuration.
 
-Because Claude Code does not support sampling, `/change-lens` still gives a full report only when
-the server has `ANTHROPIC_API_KEY`. Otherwise it shows the facts-only report with the reason.
+Cost and privacy: each `/change-lens` is one extra model call on your session, with your session's
+model and account. It sends the diff, wrapped as untrusted data, to that model and nowhere else.
+The findings are text written from repository content, so once the report is in your conversation
+treat it as untrusted data, as you would the output of asking Claude to call the tool.
 
 Load it for a session from a clone:
 
@@ -197,21 +269,25 @@ before the call, and the server validates them again. To run the mod's tests, us
 ## Getting a full report
 
 The server collects the facts itself. A language model then turns them into findings. The server
-has two ways to reach one, tried in this order:
+has these ways to reach one. The first three are tried in order; the fourth is used when the caller
+asks for it:
 
 | Order | How | Needs | `analysis_source` |
 |-------|-----|-------|-------------------|
 | 1 | **Sampling**: the server asks the client to run the model | A client that supports sampling. No key on the server. | `client-sampling` |
 | 2 | **Direct API call** | `ANTHROPIC_API_KEY` on the server | `anthropic-api` |
 | 3 | Facts only | Nothing | `none` |
+| Caller asks | **Two-step**: the caller runs the prompt with its own model and sends the reply back | A caller that uses `defer_analysis` and `report`, such as the Claude Code mod. No key. | `host-model` |
 
 If a step is unavailable or fails, the server moves to the next one. It never fails the tool.
 
-**Claude Code does not support sampling today.** There, a full report needs `ANTHROPIC_API_KEY` on
-the server (`claude mcp add ... -e ANTHROPIC_API_KEY=...`). Without it you get facts only.
+**Claude Code does not support sampling today.** When Claude calls the tool itself, a full report
+needs `ANTHROPIC_API_KEY` on the server (`claude mcp add ... -e ANTHROPIC_API_KEY=...`). Without it
+you get facts only. The `/change-lens` command from the mod avoids this and needs no key (see the
+quick start).
 
-To get a full report with no server key, use a client that supports sampling. The repo includes a
-simple one for this purpose:
+Outside Claude Code, to get a full report with no server key, use a client that supports sampling.
+The repo includes a simple one for this purpose:
 
 ### Example sampling client
 
@@ -362,6 +438,10 @@ Repository content is untrusted.
 - The model sees repository text wrapped as untrusted data and has no tools.
 - Diffs are size-capped, and truncation is reported.
 - The API key is read only from the server's environment.
+- In Claude Code, a report printed by `/change-lens` joins your conversation, where the session's
+  model can read it. Its text comes from repository content, so it is untrusted data.
+- A `report` from a caller is only data: it must be a JSON object with the required fields and at
+  most 100,000 characters, it is never executed, and a bad one is an error.
 
 ## Limits
 

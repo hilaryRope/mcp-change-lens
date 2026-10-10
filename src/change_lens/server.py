@@ -15,8 +15,9 @@ MCP features used deliberately:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
@@ -41,6 +42,13 @@ mcp = FastMCP(
 )
 
 
+class AnalysisRequest(BaseModel):
+    """What a caller needs to run the analysis with its own model (see `defer_analysis`)."""
+    system: str = Field(description="System prompt for the model")
+    prompt: str = Field(description="The user message: repository content wrapped as untrusted data")
+    max_tokens: int = Field(description="Suggested cap for the model's reply")
+
+
 class ImpactReport(BaseModel):
     behaviour_changes: list[str] = Field(description="What may be different in practice: behaviour, documented guidance, build/CI/config effects (hypotheses)")
     existing_tests: list[str] = Field(description="Existing tests covering the change, and gaps")
@@ -53,8 +61,13 @@ class ImpactReport(BaseModel):
         description="Changed files grouped as code, test, docs, config, ci or other")
     has_changes: bool = Field(description="False when base and head are identical")
     changed_functions: list[str] = Field(description="Functions detected as changed, as path:name")
-    analysis_source: Literal["client-sampling", "anthropic-api", "none"] = Field(
-        description="Who produced the behavioural classification; 'none' means facts only")
+    analysis_source: Literal["client-sampling", "anthropic-api", "host-model", "none"] = Field(
+        description="Who produced the behavioural classification: client sampling, the server's own API "
+                    "call, the caller's own model (host-model, via `report`), or none for facts only")
+    analysis_request: AnalysisRequest | None = Field(
+        default=None,
+        description="Set only when `defer_analysis` is true: run it with your own model, then call again "
+                    "with the model's reply as `report`")
     truncated: bool = Field(description="True if the diff was too large and was truncated")
     summary: str = Field(description="Human-readable report")
 
@@ -122,6 +135,15 @@ async def _warn(ctx: Context, msg: str) -> None:
         pass  # logging must never break the tool
 
 
+def _wrap(context: str) -> str:
+    """Repository text always travels to a model wrapped as untrusted data."""
+    return f"<untrusted_repository_content>\n{context}\n</untrusted_repository_content>"
+
+
+SAMPLING_MAX_TOKENS = 3000
+MAX_REPORT_CHARS = 100_000
+
+
 async def _sample(ctx: Context, context: str) -> tuple[dict | None, str]:
     """Ask the client's own model, if it advertises sampling.
 
@@ -132,10 +154,9 @@ async def _sample(ctx: Context, context: str) -> tuple[dict | None, str]:
         return None, "the client does not support sampling"
     try:
         res = await ctx.session.create_message(
-            messages=[SamplingMessage(role="user", content=TextContent(
-                type="text", text=f"<untrusted_repository_content>\n{context}\n</untrusted_repository_content>"))],
+            messages=[SamplingMessage(role="user", content=TextContent(type="text", text=_wrap(context)))],
             system_prompt=llm.SYSTEM + "\n" + llm.JSON_INSTRUCTIONS,
-            max_tokens=3000,
+            max_tokens=SAMPLING_MAX_TOKENS,
             model_preferences=ModelPreferences(intelligencePriority=0.8, costPriority=0.3, speedPriority=0.3),
         )
         if not isinstance(res.content, TextContent):
@@ -164,6 +185,13 @@ async def explain_change(
         description="Head Git ref to compare against base")] = "HEAD",
     repo_path: Annotated[str, Field(
         description="Path to the Git repository; must be inside CHANGE_LENS_ALLOWED_ROOTS (default: server cwd)")] = ".",
+    defer_analysis: Annotated[bool, Field(
+        description="Run no model. Return the facts plus `analysis_request` so the caller can run the analysis "
+                    "with its own model, then call again with the reply as `report`")] = False,
+    report: Annotated[str | dict[str, Any] | None, Field(
+        description="The caller's own model's reply to `analysis_request`: the JSON object, as an object or "
+                    "as text (it may sit inside other text). Validated and rendered instead of running any "
+                    "analysis here")] = None,
 ) -> ImpactReport:
     """Review a change between two Git refs (commits, branches or tags) and explain what it may mean in practice.
 
@@ -176,7 +204,13 @@ async def explain_change(
     Returns these with a confidence level. Findings are hypotheses grounded in the diff and tests.
     Compares committed content only. If base and head are identical it says so (has_changes=false);
     try base='HEAD~1' to review the latest commit. Read-only; never executes repository code.
+
+    Optional two-step mode for callers that have their own model but cannot offer sampling: call with
+    defer_analysis=true to get the facts and an analysis_request, run it with your model, then call again
+    with the same refs and the model's JSON reply as `report`.
     """
+    if defer_analysis and report is not None:
+        raise ToolError("Use either defer_analysis or report, not both.")
     try:
         await ctx.report_progress(0, 3, "Reading diff")
         repo = await asyncio.to_thread(lambda: gitops.toplevel(gitops.resolve_repo(repo_path)))
@@ -208,20 +242,39 @@ async def explain_change(
     context = build_context(base, head, changes, tests, commits, truncated)
 
     await ctx.report_progress(2, 3, "Classifying behavioural impact")
-    report, why_not = await _sample(ctx, context)
-    source, problems = "client-sampling", [why_not] if why_not else []
-    if report is None:
-        if llm.available():
-            try:
-                report, source = await asyncio.to_thread(llm.classify, context), "anthropic-api"
-            except Exception as e:
-                problems.append(f"Anthropic API call failed ({_reason(e)})")
-                await _warn(ctx, problems[-1])
-        else:
-            problems.append("ANTHROPIC_API_KEY is not set")
-    if report is None:
-        source = "none"
-    note = "" if report else "no behavioural analysis: " + "; ".join(problems) + "."
+    parsed: dict | None = None
+    request: AnalysisRequest | None = None
+    if report is not None:  # the caller already ran the analysis with its own model
+        try:
+            # The MCP layer turns a JSON-looking string into an object before this function sees it.
+            text = report if isinstance(report, str) else json.dumps(report)
+            if len(text) > MAX_REPORT_CHARS:
+                raise ValueError(f"reply is longer than {MAX_REPORT_CHARS} characters")
+            parsed = llm.parse_report(text)
+        except Exception as e:
+            raise ToolError(f"`report` is not a valid analysis reply ({_reason(e)}).") from e
+        source, note = "host-model", ""
+    elif defer_analysis:  # no model here: hand the caller everything it needs
+        request = AnalysisRequest(system=llm.SYSTEM + "\n" + llm.JSON_INSTRUCTIONS,
+                                  prompt=_wrap(context), max_tokens=4000)
+        source, note = "none", ("analysis deferred: run analysis_request with your own model, then call "
+                                "again with its reply as `report`.")
+    else:
+        parsed, why_not = await _sample(ctx, context)
+        source, problems = "client-sampling", [why_not] if why_not else []
+        if parsed is None:
+            if llm.available():
+                try:
+                    parsed, source = await asyncio.to_thread(llm.classify, context), "anthropic-api"
+                except Exception as e:
+                    problems.append(f"Anthropic API call failed ({_reason(e)})")
+                    await _warn(ctx, problems[-1])
+            else:
+                problems.append("ANTHROPIC_API_KEY is not set")
+        if parsed is None:
+            source = "none"
+        note = "" if parsed else "no behavioural analysis: " + "; ".join(problems) + "."
+    report = parsed
     await ctx.report_progress(3, 3, "Done")
 
     r = report or {"behaviour_changes": [], "existing_tests": [], "affected_components": [],
@@ -232,7 +285,7 @@ async def explain_change(
             "confidence", "confidence_reason")},
         changed_files=[c.path for c in changes], changed_files_by_kind=by_kind, has_changes=True,
         changed_functions=fns,
-        analysis_source=source, truncated=truncated,
+        analysis_source=source, analysis_request=request, truncated=truncated,
         summary=render(report, fns, tests, truncated, note, changes),
     )
 

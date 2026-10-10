@@ -300,3 +300,73 @@ def test_api_reply_without_a_structured_report_is_a_failure(fake_api):
     res = call_with(fake_api)
     assert res.structuredContent["analysis_source"] == "none"
     assert "model returned no structured report" in res.structuredContent["summary"]
+
+
+# --- two-step mode: the caller runs the analysis with its own model (defer_analysis / report) ---
+
+def args_for(repo, **extra):
+    return {"base": "HEAD~1", "head": "HEAD", "repo_path": str(repo), **extra}
+
+
+def test_defer_analysis_returns_a_request_and_runs_no_model(fake_api):
+    from mcp.types import CreateMessageResult, TextContent
+    asked = []
+
+    async def sampler(context, params):
+        asked.append(1)
+        return CreateMessageResult(role="assistant", model="x", content=TextContent(type="text", text="{}"))
+
+    async def run():
+        async with create_connected_server_and_client_session(mcp._mcp_server, sampling_callback=sampler) as c:
+            return await c.call_tool("explain_change", args_for(fake_api, defer_analysis=True))
+    res = asyncio.run(run())
+    s = res.structuredContent
+    assert not res.isError
+    assert s["analysis_source"] == "none" and s["has_changes"] is True
+    assert "analysis deferred" in s["summary"]
+    assert asked == [] and FakeAnthropic.calls == []           # neither sampling nor the API key was used
+    req = s["analysis_request"]
+    assert req["prompt"].startswith("<untrusted_repository_content>")
+    assert "range(3)" in req["prompt"] and req["prompt"].rstrip().endswith("</untrusted_repository_content>")
+    assert "behaviour_changes" in req["system"]                # the JSON format the reply must follow
+    assert req["max_tokens"] > 0
+
+
+def test_report_is_validated_and_rendered(fake_api):
+    import json
+    res = call(args_for(fake_api, report=json.dumps(REPORT)))
+    s = res.structuredContent
+    assert not res.isError
+    assert s["analysis_source"] == "host-model" and s["analysis_request"] is None
+    assert "retry 3 times" in s["summary"] and s["confidence"] == "Medium"
+    assert "Note:" not in s["summary"]
+    assert FakeAnthropic.calls == []
+
+
+def test_report_may_be_wrapped_in_prose(fake_api):
+    import json
+    res = call(args_for(fake_api, report="Here is the analysis:\n" + json.dumps(REPORT) + "\nDone."))
+    assert res.structuredContent["analysis_source"] == "host-model"
+
+
+@pytest.mark.parametrize("bad", ["no json here", "{}", '{"behaviour_changes": []}', "x" * 100_001])
+def test_invalid_report_is_a_tool_error(fake_api, bad):
+    res = call(args_for(fake_api, report=bad))
+    assert res.isError and "not a valid analysis reply" in res.content[0].text
+
+
+def test_defer_and_report_together_are_rejected(fake_api):
+    import json
+    res = call(args_for(fake_api, defer_analysis=True, report=json.dumps(REPORT)))
+    assert res.isError and "not both" in res.content[0].text
+
+
+def test_default_call_has_no_analysis_request(repo):
+    res = call(args_for(repo))
+    assert res.structuredContent["analysis_request"] is None
+    assert res.structuredContent["analysis_source"] == "none"
+
+
+def test_report_may_be_passed_as_an_object(fake_api):
+    res = call(args_for(fake_api, report=REPORT))   # a dict, as the MCP layer delivers a JSON-looking string
+    assert not res.isError and res.structuredContent["analysis_source"] == "host-model"

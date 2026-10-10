@@ -10,3 +10,5 @@ CACHEDIR.TAG
 .mcp.json
 .claude/settings.local.json
 .pytest_cache
+claude-mod/tsconfig.json
+claude-mod/.claude-plugin/types/

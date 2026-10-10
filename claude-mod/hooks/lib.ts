@@ -36,9 +36,70 @@ type McpResult = {
   structuredContent?: unknown
 }
 
-/** The readable report from an `explain_change` result: its `summary`, else its first text block. */
+/** The readable report from an `explain_change` result.
+ *
+ * The server returns the report as structured content and also as JSON text. `$.mcp.call` may hand
+ * back only the text, so try, in order: the structured `summary`, the `summary` inside the JSON
+ * text, then the first text block as it is.
+ */
 export function summaryOf(result: McpResult): string {
   const structured = result.structuredContent as { summary?: unknown } | undefined
   if (typeof structured?.summary === 'string') return structured.summary
-  return result.content.find(block => block.type === 'text')?.text ?? '(the tool returned no text)'
+
+  const text = result.content.find(block => block.type === 'text')?.text
+  if (text === undefined) return '(the tool returned no text)'
+  try {
+    const parsed = JSON.parse(text) as { summary?: unknown }
+    if (typeof parsed?.summary === 'string') return parsed.summary
+  } catch {
+    // not JSON: an error message or plain text, show it as it is
+  }
+
+  return text
+}
+
+/** The permission rule that lets the mod call the server's tool. */
+export const PERMISSION = `mcp__${SERVER}__${TOOL}`
+
+/** True when Claude Code refused the call for lack of permission, not because the server is down. */
+export function isPermissionRefusal(message: string): boolean {
+  return /permission|haven't granted|not granted/i.test(message)
+}
+
+export type AnalysisRequest = { system: string; prompt: string; max_tokens: number }
+
+/** The structured report from an `explain_change` result: its structured content, else its JSON text. */
+export function structuredOf(result: McpResult): Record<string, unknown> | undefined {
+  if (result.structuredContent && typeof result.structuredContent === 'object') {
+    return result.structuredContent as Record<string, unknown>
+  }
+  const text = result.content.find(block => block.type === 'text')?.text
+  if (text === undefined) return undefined
+  try {
+    const parsed: unknown = JSON.parse(text)
+
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The request the server wants run with the caller's own model, if it sent a well-formed one. */
+export function analysisRequestOf(structured: Record<string, unknown> | undefined): AnalysisRequest | undefined {
+  const request = structured?.analysis_request as Partial<AnalysisRequest> | null | undefined
+  if (!request || typeof request.system !== 'string' || typeof request.prompt !== 'string') return undefined
+
+  return {
+    system: request.system,
+    prompt: request.prompt,
+    max_tokens: typeof request.max_tokens === 'number' && request.max_tokens > 0 ? request.max_tokens : 4000,
+  }
+}
+
+/** Why a model call produced no text, in one line. */
+export function whyNoAnswer(result: { isAnswered: boolean; reason?: string; status?: number | null; error?: string }): string {
+  if (result.isAnswered) return 'answered'
+  const detail = [result.status ? `HTTP ${result.status}` : undefined, result.error].filter(Boolean).join(', ')
+
+  return `${result.reason ?? 'no reply'}${detail ? ` (${detail})` : ''}`
 }
