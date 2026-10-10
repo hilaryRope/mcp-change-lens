@@ -127,12 +127,18 @@ treats that text as data to parse.
 
 Claude Code has no sampling handler, so the repo includes `examples/sampling_client.py`, a minimal
 client with a real callback. It starts the server over stdio without any key, answers the server's
-sampling request by calling Claude with its own `ANTHROPIC_API_KEY`, and prints the report. From
-inside the repository you want to analyse:
+sampling request by calling Claude with its own `ANTHROPIC_API_KEY`, and prints the report.
+
+Run it with a Python environment that has this package installed. That provides the `anthropic`
+and `mcp` libraries, and puts `mcp-change-lens` on the PATH, which the client uses to start the
+server. A system `python3` without them fails with `No module named 'anthropic'`, and a
+`uv tool install` of the server does not help because it keeps its packages isolated. From a clone:
 
 ```sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
 export ANTHROPIC_API_KEY=...
-python examples/sampling_client.py HEAD~1 HEAD
+python examples/sampling_client.py HEAD~1 HEAD   # run inside the repo you want to analyse
 ```
 
 `analysis_source: client-sampling` at the end of the output confirms the sampling path ran. The
