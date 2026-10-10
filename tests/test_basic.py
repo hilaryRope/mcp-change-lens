@@ -177,3 +177,126 @@ def test_file_kinds():
     k = analysis.file_kind
     assert [k("src/a.rs"), k("tests/a_test.rs"), k("LICENSE"), k("docs/guide/x.html"), k("pyproject.toml"),
             k("img/logo.png")] == ["code", "test", "docs", "docs", "config", "other"]
+
+
+# --- direct Anthropic API path (strategy 2), with a fake client instead of the real API ---
+
+REPORT = {"behaviour_changes": ["fetch may now retry 3 times"], "existing_tests": [],
+          "affected_components": ["svc"], "missing_tests": ["non-retryable errors"],
+          "confidence": "Medium", "confidence_reason": "fake"}
+
+
+class FakeAnthropic:
+    """Stands in for anthropic.Anthropic; records the request and returns a canned reply."""
+    calls: list = []
+    reply = None   # list of content blocks, or an Exception to raise
+
+    def __init__(self, *a, **k):
+        self.messages = self
+
+    def create(self, **kwargs):
+        FakeAnthropic.calls.append(kwargs)
+        if isinstance(FakeAnthropic.reply, Exception):
+            raise FakeAnthropic.reply
+        return type("Resp", (), {"content": FakeAnthropic.reply})()
+
+
+def tool_use(payload):
+    return type("Block", (), {"type": "tool_use", "input": payload})()
+
+
+@pytest.fixture
+def fake_api(repo, monkeypatch):
+    import anthropic
+    FakeAnthropic.calls, FakeAnthropic.reply = [], [tool_use(REPORT)]
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("CHANGE_LENS_MODEL", raising=False)
+    return repo
+
+
+def call_with(repo, sampling_callback=None, logs=None):
+    async def on_log(params):
+        logs.append(params.data)
+
+    async def run():
+        async with create_connected_server_and_client_session(
+                mcp._mcp_server, sampling_callback=sampling_callback,
+                logging_callback=on_log if logs is not None else None) as c:
+            return await c.call_tool("explain_change", {"base": "HEAD~1", "repo_path": str(repo)})
+    return asyncio.run(run())
+
+
+def test_api_used_when_client_has_no_sampling(fake_api):
+    res = call_with(fake_api)
+    s = res.structuredContent
+    assert not res.isError
+    assert s["analysis_source"] == "anthropic-api"
+    assert "retry 3 times" in s["summary"] and s["confidence"] == "Medium"
+    assert "Note:" not in s["summary"]
+
+
+def test_api_request_shape(fake_api):
+    call_with(fake_api)
+    (req,) = FakeAnthropic.calls
+    assert req["model"] == "claude-sonnet-5-5"
+    assert req["max_tokens"] == 4000
+    assert req["tool_choice"] == {"type": "tool", "name": "report_impact"}
+    assert [t["name"] for t in req["tools"]] == ["report_impact"]
+    (msg,) = req["messages"]
+    assert msg["role"] == "user"
+    assert msg["content"].startswith("<untrusted_repository_content>")
+    assert "range(3)" in msg["content"] and msg["content"].rstrip().endswith("</untrusted_repository_content>")
+    assert "ANTHROPIC_API_KEY" not in str(req) and "sk-test" not in str(req)   # key is never sent as content
+
+
+def test_api_model_is_configurable(fake_api, monkeypatch):
+    monkeypatch.setenv("CHANGE_LENS_MODEL", "my-model")
+    call_with(fake_api)
+    assert FakeAnthropic.calls[0]["model"] == "my-model"
+
+
+def test_sampling_takes_priority_over_the_api(fake_api):
+    from mcp.types import CreateMessageResult, TextContent
+
+    async def llm(context, params):
+        import json
+        return CreateMessageResult(role="assistant", model="fake",
+                                   content=TextContent(type="text", text=json.dumps(REPORT)))
+    res = call_with(fake_api, sampling_callback=llm)
+    assert res.structuredContent["analysis_source"] == "client-sampling"
+    assert FakeAnthropic.calls == []          # key is set, but the API is never called
+
+
+def test_api_is_the_fallback_when_sampling_fails(fake_api):
+    from mcp.types import ErrorData
+
+    async def broken(context, params):
+        return ErrorData(code=-32603, message="boom")
+    res = call_with(fake_api, sampling_callback=broken)
+    s = res.structuredContent
+    assert s["analysis_source"] == "anthropic-api"
+    assert len(FakeAnthropic.calls) == 1
+    assert "Note:" not in s["summary"]        # a successful fallback leaves no failure note
+
+
+def test_api_failure_is_logged_and_reported(fake_api):
+    FakeAnthropic.reply = RuntimeError("401 invalid x-api-key")
+    logs = []
+    res = call_with(fake_api, logs=logs)
+    s = res.structuredContent
+    assert not res.isError
+    assert s["analysis_source"] == "none" and s["confidence"] == "Low"
+    note = s["summary"].split("Note: ", 1)[1]
+    assert "the client does not support sampling" in note
+    assert "Anthropic API call failed (RuntimeError: 401 invalid x-api-key)" in note
+    assert "ANTHROPIC_API_KEY is not set" not in note      # it is set, so do not claim otherwise
+    assert any("Anthropic API call failed" in str(m) for m in logs)
+    assert not any("range(3)" in str(m) or "sk-test" in str(m) for m in logs)
+
+
+def test_api_reply_without_a_structured_report_is_a_failure(fake_api):
+    FakeAnthropic.reply = [type("Block", (), {"type": "text", "text": "I refuse"})()]
+    res = call_with(fake_api)
+    assert res.structuredContent["analysis_source"] == "none"
+    assert "model returned no structured report" in res.structuredContent["summary"]
