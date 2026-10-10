@@ -38,8 +38,8 @@ or in `.mcp.json` / Claude Desktop config:
     "env": { "CHANGE_LENS_ALLOWED_ROOTS": "/Users/me/code" } } } }
 ```
 
-`CHANGE_LENS_ALLOWED_ROOTS` must contain every repository you want to analyse (colon-separated
-for several). A repo outside it is rejected with `... is outside the allowed roots`. To change it,
+`CHANGE_LENS_ALLOWED_ROOTS` must contain every repository you want to analyse (several are
+separated by `:`, or `;` on Windows). A repo outside it is rejected with `... is outside the allowed roots`. To change it,
 re-add the server and reconnect (`/mcp` in Claude Code, or restart the client); a running server
 keeps the environment it was started with.
 
@@ -64,8 +64,7 @@ takes `base`, optionally `head` (default `HEAD`) and `repo_path` (default `.`, i
 the client started the server from). Both refs must exist locally; fetch first if you want to
 compare against a remote branch.
 
-To explain just the latest commit, compare `HEAD~1` with `HEAD`. The example report below was
-produced by running this on this repository:
+To explain just the latest commit, compare `HEAD~1` with `HEAD`:
 
 ```sh
 claude -p "Use the change-lens explain_change tool with base HEAD~1 and head HEAD in this repo and print its summary verbatim." \
@@ -97,8 +96,13 @@ Many clients, including Claude Code at the time of writing, do not support sampl
 client and no `ANTHROPIC_API_KEY`, you get the facts-only report. The key is optional and is only
 ever read from the server's environment.
 
-A facts-only report looks like this. This is the real output for commit `58fe62e` of this
-repository, compared against its parent with the `HEAD~1` command shown under [Usage](#usage):
+A facts-only report looks like this. It is the real output for commit `58fe62e` of this repository,
+compared against its parent `26f2d4d`, and can be reproduced from a clone with:
+
+```sh
+claude -p "Use the change-lens explain_change tool with base 26f2d4d and head 58fe62e in this repo and print its summary verbatim." \
+  --allowedTools "mcp__change-lens__explain_change"
+```
 
 ```
 Behavioural impact
@@ -168,6 +172,8 @@ Function detection is regex/indentation based (Rust, Python, JS/TS, Go, Java/Kot
 parser. Test matching is by name reference. Both are heuristics that feed the LLM, which is told to hedge.
 
 ## Development
+
+Requires Python 3.10 or newer.
 
 ```sh
 pip install -e . pytest && pytest
