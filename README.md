@@ -223,6 +223,47 @@ Because the behaviour depends on the client, the sampling path is covered by a t
 the server with a fake sampling callback (`test_classification_via_client_sampling`) rather than a real
 model. The facts-only path is covered separately by `test_facts_without_llm`.
 
+A full report, produced when sampling works or `ANTHROPIC_API_KEY` is set, looks like this. It
+uses the same commits as the facts-only example below (`26f2d4d` to `58fe62e`). The layout is the
+tool's real output. The findings were written by hand to show the format, because the wording in a
+real run comes from the model and varies from run to run:
+
+```
+Behavioural impact
+------------------
+1. Documentation, configuration and CI file changes are now reported alongside code, so a docs-only or CI-only diff no longer comes back empty.
+2. Comparing two identical refs may now return a normal result saying nothing differs, instead of an error.
+3. Test files are now matched by path and by name, which may change which existing tests are listed as covering a change.
+
+Existing tests
+1. tests/test_basic.py (modified in this change) now includes tests for identical refs, docs and config changes, and file kinds.
+
+Potentially affected components
+1. src/change_lens/analysis.py: file_kind, collect, is_test_path
+2. src/change_lens/server.py: build_context, render, explain_change
+
+Missing test scenarios
+1. A diff that mixes code, docs and CI changes in one commit.
+2. Renamed or deleted files in the changed-file groups.
+
+Changed files
+1. README.md [docs, modified, +7/-0]
+2. src/change_lens/analysis.py [code, modified, +31/-1]
+3. src/change_lens/llm.py [code, modified, +10/-2]
+4. src/change_lens/server.py [code, modified, +44/-14]
+5. tests/test_basic.py [test, modified, +25/-0]
+
+Confidence: Medium (the diff is fully visible, but behaviour is inferred from source and tests, not by running them)
+
+These findings are hypotheses grounded in the diff and tests, not guaranteed discoveries.
+```
+
+Compared with the facts-only report, the four findings sections are filled in, "Changed functions"
+and the failure note are not shown, and the confidence line carries the model's reason. The
+structured content has the same lists as fields (`behaviour_changes`, `existing_tests`,
+`affected_components`, `missing_tests`, `confidence`, `confidence_reason`), with
+`analysis_source` set to `client-sampling` or `anthropic-api` depending on which path ran.
+
 A facts-only report looks like this. It is the real output for commit `58fe62e` of this repository,
 compared against its parent `26f2d4d`, and can be reproduced from a clone with:
 
