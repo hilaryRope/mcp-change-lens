@@ -155,6 +155,23 @@ pip install -U pip
 pip install --only-binary=cryptography -e .
 ```
 
+#### If the report says sampling is unsupported but the client does support it
+
+The facts-only note reads "the client does not support sampling and ANTHROPIC_API_KEY is not set
+(or the call failed)". It is the same text whether the client lacks sampling or the sampling call
+failed, so read the client's own log to tell them apart. With the example client:
+
+- The log line `[client] server requested sampling ... calling <model>` means sampling is
+  supported and the request reached the callback. Anything that goes wrong after it is a failed
+  call, not a missing capability.
+- `Could not resolve authentication method` right after that line means the client's own
+  `ANTHROPIC_API_KEY` is not set in the shell that ran it. The server cannot supply one, because it
+  is deliberately started without a key. Export the key in that shell and run the client again.
+- No `[client] server requested sampling` line means the request never reached the callback.
+
+In every failed case the server falls through silently and returns the facts-only report with
+`analysis_source: "none"`.
+
 ### The fallbacks
 
 - **Anthropic API.** If sampling was unavailable or failed and `ANTHROPIC_API_KEY` is set, the server
