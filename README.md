@@ -123,6 +123,22 @@ subscription and model do the work, which is why this is the preferred path.
 The model gets no tools in this exchange. It receives text and returns text, and the server only
 treats that text as data to parse.
 
+### Trying it: the example client
+
+Claude Code has no sampling handler, so the repo includes `examples/sampling_client.py`, a minimal
+client with a real callback. It starts the server over stdio without any key, answers the server's
+sampling request by calling Claude with its own `ANTHROPIC_API_KEY`, and prints the report. From
+inside the repository you want to analyse:
+
+```sh
+export ANTHROPIC_API_KEY=...
+python examples/sampling_client.py HEAD~1 HEAD
+```
+
+`analysis_source: client-sampling` at the end of the output confirms the sampling path ran. The
+callback is the part to copy into your own client: pass it as `sampling_callback=` to
+`ClientSession`, and the client starts advertising the capability.
+
 ### The fallbacks
 
 - **Anthropic API.** If sampling was unavailable or failed and `ANTHROPIC_API_KEY` is set, the server
