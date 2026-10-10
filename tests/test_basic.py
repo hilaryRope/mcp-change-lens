@@ -79,6 +79,54 @@ def test_classification_via_client_sampling(repo):
     assert "<untrusted_repository_content>" in seen["prompt"] and "range(3)" in seen["prompt"]
 
 
+def test_note_says_sampling_unsupported(repo):
+    res = call({"base": "HEAD~1", "head": "HEAD", "repo_path": str(repo)})
+    note = res.structuredContent["summary"].split("Note: ", 1)[1]
+    assert "the client does not support sampling" in note
+    assert "ANTHROPIC_API_KEY is not set" in note
+    assert "failed" not in note
+
+
+def test_failed_sampling_is_logged_and_reported(repo):
+    from mcp.types import ErrorData
+    logs = []
+
+    async def broken_llm(context, params):
+        return ErrorData(code=-32603, message="Could not resolve authentication method")
+
+    async def on_log(params):
+        logs.append(params.data)
+
+    async def run():
+        async with create_connected_server_and_client_session(
+                mcp._mcp_server, sampling_callback=broken_llm, logging_callback=on_log) as c:
+            return await c.call_tool("explain_change", {"base": "HEAD~1", "repo_path": str(repo)})
+    res = asyncio.run(run())
+    s = res.structuredContent
+    assert s["analysis_source"] == "none"
+    note = s["summary"].split("Note: ", 1)[1]
+    assert "client sampling failed" in note and "Could not resolve authentication method" in note
+    assert "does not support sampling" not in note
+    assert any("client sampling failed" in str(m) for m in logs)
+    assert not any("range(3)" in str(m) for m in logs)  # repository content is never logged
+
+
+def test_unparseable_sampling_reply_falls_back(repo):
+    from mcp.types import CreateMessageResult, TextContent
+
+    async def chatty_llm(context, params):
+        return CreateMessageResult(role="assistant", model="fake",
+                                   content=TextContent(type="text", text="Sure! No JSON here."))
+
+    async def run():
+        async with create_connected_server_and_client_session(mcp._mcp_server, sampling_callback=chatty_llm) as c:
+            return await c.call_tool("explain_change", {"base": "HEAD~1", "repo_path": str(repo)})
+    res = asyncio.run(run())
+    assert not res.isError
+    assert res.structuredContent["analysis_source"] == "none"
+    assert "client sampling failed (ValueError: no JSON object in reply)" in res.structuredContent["summary"]
+
+
 def test_calls_and_control_flow_are_not_definitions():
     for line in ["        match http_call(req) {", "    if check(x) {", "    return get(url)", "    http_call(req)"]:
         assert analysis.func_name(line) is None, line

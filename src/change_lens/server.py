@@ -11,6 +11,7 @@ MCP features used deliberately:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Annotated, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -20,6 +21,8 @@ from mcp.types import (ClientCapabilities, ModelPreferences, SamplingCapability,
 from pydantic import BaseModel, Field
 
 from . import analysis, gitops, llm
+
+log = logging.getLogger("change_lens")
 
 mcp = FastMCP(
     "change-lens",
@@ -99,10 +102,28 @@ def render(report: dict | None, fns: list[str], tests, truncated: bool, note: st
     return "\n".join(out)
 
 
-async def _sample(ctx: Context, context: str) -> dict | None:
-    """Ask the client's own model, if it advertises sampling."""
+def _reason(e: Exception) -> str:
+    """Short, single-line description of a failure. Never includes repository content."""
+    return f"{type(e).__name__}: {' '.join(str(e).split())[:200]}"
+
+
+async def _warn(ctx: Context, msg: str) -> None:
+    """Make a failure visible: on the server's stderr and, best effort, to the client."""
+    log.warning(msg)
+    try:
+        await ctx.warning(msg)
+    except Exception:
+        pass  # logging must never break the tool
+
+
+async def _sample(ctx: Context, context: str) -> tuple[dict | None, str]:
+    """Ask the client's own model, if it advertises sampling.
+
+    Returns (report, why_not): why_not is empty on success, otherwise a short reason that is
+    also logged, so "unsupported" can be told apart from "failed".
+    """
     if not ctx.session.check_client_capability(ClientCapabilities(sampling=SamplingCapability())):
-        return None
+        return None, "the client does not support sampling"
     try:
         res = await ctx.session.create_message(
             messages=[SamplingMessage(role="user", content=TextContent(
@@ -111,11 +132,13 @@ async def _sample(ctx: Context, context: str) -> dict | None:
             max_tokens=3000,
             model_preferences=ModelPreferences(intelligencePriority=0.8, costPriority=0.3, speedPriority=0.3),
         )
-        if isinstance(res.content, TextContent):
-            return llm.parse_report(res.content.text)
-    except Exception:
-        pass  # client declined / bad output: fall through to the next strategy
-    return None
+        if not isinstance(res.content, TextContent):
+            raise ValueError(f"client returned non-text content ({type(res.content).__name__})")
+        return llm.parse_report(res.content.text), ""
+    except Exception as e:  # client declined / errored / bad output: fall through
+        why = f"client sampling failed ({_reason(e)})"
+        await _warn(ctx, why)
+        return None, why
 
 
 @mcp.tool(
@@ -177,16 +200,20 @@ async def explain_change(
     context = build_context(base, head, changes, tests, commits, truncated)
 
     await ctx.report_progress(2, 3, "Classifying behavioural impact")
-    report, source = await _sample(ctx, context), "client-sampling"
-    if report is None and llm.available():
-        try:
-            report, source = await asyncio.to_thread(llm.classify, context), "anthropic-api"
-        except Exception:
-            report = None
-    note = "" if report else (
-        "the client does not support sampling and ANTHROPIC_API_KEY is not set (or the call failed).")
+    report, why_not = await _sample(ctx, context)
+    source, problems = "client-sampling", [why_not] if why_not else []
+    if report is None:
+        if llm.available():
+            try:
+                report, source = await asyncio.to_thread(llm.classify, context), "anthropic-api"
+            except Exception as e:
+                problems.append(f"Anthropic API call failed ({_reason(e)})")
+                await _warn(ctx, problems[-1])
+        else:
+            problems.append("ANTHROPIC_API_KEY is not set")
     if report is None:
         source = "none"
+    note = "" if report else "no behavioural analysis: " + "; ".join(problems) + "."
     await ctx.report_progress(3, 3, "Done")
 
     r = report or {"behaviour_changes": [], "existing_tests": [], "affected_components": [],

@@ -155,22 +155,33 @@ pip install -U pip
 pip install --only-binary=cryptography -e .
 ```
 
-#### If the report says sampling is unsupported but the client does support it
+#### Telling "unsupported" from "failed"
 
-The facts-only note reads "the client does not support sampling and ANTHROPIC_API_KEY is not set
-(or the call failed)". It is the same text whether the client lacks sampling or the sampling call
-failed, so read the client's own log to tell them apart. With the example client:
+The facts-only note lists every reason the analysis could not run, one per strategy:
 
-- The log line `[client] server requested sampling ... calling <model>` means sampling is
-  supported and the request reached the callback. Anything that goes wrong after it is a failed
-  call, not a missing capability.
-- `Could not resolve authentication method` right after that line means the client's own
-  `ANTHROPIC_API_KEY` is not set in the shell that ran it. The server cannot supply one, because it
-  is deliberately started without a key. Export the key in that shell and run the client again.
-- No `[client] server requested sampling` line means the request never reached the callback.
+```
+Note: no behavioural analysis: the client does not support sampling; ANTHROPIC_API_KEY is not set.
+Note: no behavioural analysis: client sampling failed (McpError: Invalid request parameters); ANTHROPIC_API_KEY is not set.
+Note: no behavioural analysis: client sampling failed (ValueError: no JSON object in reply); Anthropic API call failed (...).
+```
 
-In every failed case the server falls through silently and returns the facts-only report with
-`analysis_source: "none"`.
+The first line means the client never advertised sampling. A `client sampling failed (...)` entry
+means it did, and the request or the reply went wrong, with the error type and message in
+brackets. When the client's callback itself raises, the MCP library reports only a generic
+`McpError: Invalid request parameters` to the server, so the real cause (a missing key, a network
+error) shows up only in the client's own log. Other failures, such as a reply with no JSON, carry
+their own message. The server also logs each failure to its stderr and sends it to the client as a
+`warning` log message, so clients that show server logs display it as it happens. Reasons are
+short and never include repository content.
+
+With the example client, the log line `[client] server requested sampling ... calling <model>`
+confirms the request reached the callback. If it is followed by a `WARNING` containing `Could not
+resolve authentication method`, the client's own `ANTHROPIC_API_KEY` is not set in the shell that ran it. The server cannot
+supply one, because it is deliberately started without a key. Export the key there and run again.
+If that line never appears, the request never reached the callback.
+
+Whatever the reason, the tool does not fail. It falls through to the next strategy and finally
+returns the facts-only report with `analysis_source: "none"`.
 
 ### The fallbacks
 
@@ -182,8 +193,8 @@ In every failed case the server falls through silently and returns the facts-onl
   the server's environment, never from tool arguments or repository content.
 - **Facts only.** If neither works, the tool still returns the extracted facts with
   `analysis_source: "none"` and Low confidence. The four findings lists are empty, and the summary
-  ends with a note saying the client does not support sampling and no key is set (or the call
-  failed). One note covers both cases, so check the client and the key if you expected a full report.
+  ends with a note giving the reason each strategy did not run, so you can tell a client without
+  sampling from a sampling call that failed (see above).
 
 ### What to expect in practice
 
@@ -236,7 +247,7 @@ Candidate existing tests
 
 Confidence: Low (no behavioural analysis performed)
 
-Note: the client does not support sampling and ANTHROPIC_API_KEY is not set (or the call failed).
+Note: no behavioural analysis: the client does not support sampling; ANTHROPIC_API_KEY is not set.
 
 These findings are hypotheses grounded in the diff and tests, not guaranteed discoveries.
 ```
