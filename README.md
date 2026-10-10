@@ -139,6 +139,30 @@ API key or your logged-in `claude` command. It starts the server, passes the mod
 and prints the report. Everything in the report still comes from the server. If Claude Code gains
 sampling support, you will not need the example client.
 
+### MCP server vs Claude Code mod
+
+The server and the mod are different kinds of thing. The server is an MCP server that offers one
+tool, `explain_change`. The mod only adds Claude Code features on top of it.
+
+| | MCP server and tool | Claude Code mod |
+|---|---|---|
+| What it is | A program that offers tools to an AI client over the MCP protocol | Code that changes how Claude Code itself looks or behaves |
+| Where it runs | Its own process, started by the client | Inside Claude Code's process |
+| Language | Any. This one is Python | TypeScript or JavaScript only |
+| Who can use it | Any MCP client: Claude Code, Claude Desktop, the example client | Claude Code only |
+| What triggers it | The model decides to call the tool, or a client calls it | Events in Claude Code, such as a typed command or a finished tool call |
+| What it adds | A new capability: reviewing a Git change | Interface and behaviour: commands, hooks, toasts, status line |
+| Does the real work | Yes. It reads Git and builds the report | No. It only reacts to events and calls the server |
+| In this repo | `src/change_lens` | `claude-mod/` |
+
+There are three ways to reach the same tool:
+
+- **Ask Claude.** The model decides to call `explain_change`.
+- **Run `/change-lens`.** The mod calls the tool directly, with no model involved.
+- **Run the example client.** It calls the tool directly and also answers the server's model requests.
+
+Without the server the mod does nothing useful. Without the mod the server works fully.
+
 ## Claude Code mod (optional)
 
 `claude-mod/` is a small Claude Code mod that makes the server easier to reach from inside Claude
