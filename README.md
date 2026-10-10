@@ -86,15 +86,65 @@ Only committed content is compared. If `base` and `head` are identical the tool 
 
 ## How the classification is produced
 
-1. **Client sampling**: if the MCP client supports `sampling`, the client's own model classifies the
-   change. No key needed on the server.
-2. Else **Anthropic API** if `ANTHROPIC_API_KEY` is set (model: `CHANGE_LENS_MODEL`, default `claude-sonnet-5-5`).
-3. Else the tool still returns the extracted facts (changed functions, candidate tests) with
-   `analysis_source: "none"` and Low confidence.
+The server gathers the facts itself (changed files, changed functions, candidate tests, commit
+subjects) and then needs a language model to turn them into behavioural findings. It never runs the
+code. It tries three strategies in order and reports which one produced the result in
+`analysis_source`.
 
-Many clients, including Claude Code at the time of writing, do not support sampling. With such a
-client and no `ANTHROPIC_API_KEY`, you get the facts-only report. The key is optional and is only
-ever read from the server's environment.
+| Order | Strategy | `analysis_source` | Needs |
+|-------|----------|-------------------|-------|
+| 1 | Client sampling | `client-sampling` | A client that supports MCP sampling |
+| 2 | Anthropic API | `anthropic-api` | `ANTHROPIC_API_KEY` in the server's environment |
+| 3 | Facts only | `none` | Nothing |
+
+### What sampling is
+
+Sampling is an MCP feature that lets a server ask the *client* to run a model call on its behalf.
+The server sends a `sampling/createMessage` request and the client answers with the model's
+completion. The server never holds a key and never chooses the model. The user's own client,
+subscription and model do the work, which is why this is the preferred path.
+
+### How change-lens uses it
+
+1. During initialisation the client declares its capabilities. Before classifying, the server checks
+   whether `sampling` is among them. If not, it skips straight to strategy 2.
+2. The server sends one request containing the extracted context wrapped in an
+   `<untrusted_repository_content>` block, plus a system prompt that tells the model to treat that
+   block as data, hedge its claims, and answer in a fixed JSON shape. The request caps the answer at
+   3000 tokens.
+3. It also passes model preferences (intelligence weighted above cost and speed). These are hints
+   only. The client decides which model actually runs, and may ask you to approve the request first.
+4. The reply is free text, so the server extracts the JSON object from it and checks that every
+   required field is present. An unknown confidence value is downgraded to Low. The result has the
+   same shape as the API path, so the report looks identical whichever strategy ran.
+5. If the client declines, errors out, or returns text that cannot be parsed, the server does not fail.
+   It falls through to strategy 2, and then to strategy 3.
+
+The model gets no tools in this exchange. It receives text and returns text, and the server only
+treats that text as data to parse.
+
+### The fallbacks
+
+- **Anthropic API.** If sampling was unavailable or failed and `ANTHROPIC_API_KEY` is set, the server
+  calls the API directly with the model named in `CHANGE_LENS_MODEL` (default `claude-sonnet-5-5`).
+  It uses the same system prompt and untrusted-content wrapping, but gets its structured output
+  through a forced tool call with a JSON schema, which is more reliable than parsing free text. That
+  tool only carries the report back and cannot touch the repository. The key is only ever read from
+  the server's environment, never from tool arguments or repository content.
+- **Facts only.** If neither works, the tool still returns the extracted facts with
+  `analysis_source: "none"` and Low confidence. The four findings lists are empty, and the summary
+  ends with a note saying the client does not support sampling and no key is set (or the call
+  failed). One note covers both cases, so check the client and the key if you expected a full report.
+
+### What to expect in practice
+
+Sampling support varies a lot between clients, and many do not implement it. Claude Code does not at
+the time of writing, so there you get the facts-only report unless you also set `ANTHROPIC_API_KEY`.
+To check which path ran, look at `analysis_source` in the structured output.
+
+Because the behaviour depends on the client, the sampling path is covered by a test that connects to
+the server with a fake sampling callback (`test_classification_via_client_sampling`) rather than a real
+model. The facts-only path is covered separately by `test_facts_without_llm`.
 
 A facts-only report looks like this. It is the real output for commit `58fe62e` of this repository,
 compared against its parent `26f2d4d`, and can be reproduced from a clone with:
